@@ -13,10 +13,11 @@
 #define ALLOW_SEND "ALL"
 #define DENY_SEND "DEN"
 #define ALDENLEN 4  
-#define SLEEPTIME 3
+#define SLEEPTIME 1
 #define BRDIP "127.0.0.255"
-#define SERVPORT 5500
-#define MYPORT 4950
+#define SERVPORT 16000
+#define MYPORT 32000
+#define PORTRANGE 10
 
 #define MAXMSGLEN 50 //максимальная длина 
 
@@ -76,8 +77,12 @@ void *udp_broadcast(void *arg)
 		} else {
 			msg = ALLOW_SEND;
 		}
-		if ((n = sendto(sock,msg,ALDENLEN,0,(const struct sockaddr *)&server,length))<0) 
-			error("Sendto");
+		for(int i = 0; i < PORTRANGE; i++){
+			if ((n = sendto(sock,msg,ALDENLEN,0,(const struct sockaddr *)&server,length))<0) 
+				error("Sendto");
+			server.sin_port = htons(SERVPORT+i);
+			printf("%d", i);
+		}	
 		printf("SERVER: udp_broadcast: packet %s sent\n", msg);
 		sleep(SLEEPTIME); //иначе много трафика гоняет
 	}

@@ -9,11 +9,12 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
-#define MYPORT 5500
-#define SERVPORT 4950
+#define MYPORT 16000
+#define SERVPORT 32000
 #define ALLOW_SEND "ALL"
 #define DENY_SEND "DEN"
 #define ALDENLEN 4
+#define PORTRANGE 10
 
 #define MAXMSGLEN 50 //максимальная длина 
 #define SLEEP 3
@@ -69,8 +70,20 @@ void *udp_listener(void *arg)
   char *all = ALLOW_SEND;
   char *den = DENY_SEND;
 
-  if (bind(mysocket, (struct sockaddr *)&local_addr, sizeof(local_addr)))
-  {    error("binding");}
+  if (bind(mysocket, (struct sockaddr *)&local_addr, sizeof(local_addr))<0)
+  {
+    //шаманство с портами
+    printf("CLIENT 1 type: udp_listener: search port\n");
+    int i=0;
+    while(i<PORTRANGE){
+      i++;
+      local_addr.sin_port = htons(MYPORT+i);
+      if (!bind(mysocket, (struct sockaddr *)&local_addr, sizeof(local_addr))){
+        printf("%d\n", i);
+        break;
+      }
+    }
+  }
   client_addr_size = sizeof(struct sockaddr_in);
   printf("CLIENT 1 type: udp_listener: listening\n");
   while (1) 
