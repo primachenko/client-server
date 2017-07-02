@@ -9,27 +9,24 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
-#define MYPORT 16000
-#define SERVPORT 32000
-#define ALLOW_SEND "ALL"
-#define DENY_SEND "DEN"
+#define MYPORT 17000
+#define SERVPORT 33000
+#define ALLOW_RECIEV "RCV"
+#define DENY_RECIEV "RDN"
 #define ALDENLEN 4
 #define PORTRANGE 10
-
-#define MAXMSGLEN 40 //максимальная длина 
-#define MINMSGLEN 10
-#define SLEEP 1
+#define MAXMSGLEN 40
 
 struct {
     pthread_mutex_t mutex;
     int allow;
-} tcp_send = { 
+} tcp_recv = { 
     PTHREAD_MUTEX_INITIALIZER
 };
 
 void *udp_listener(void*);
 
-void *tcp_sender(void*);
+void *tcp_reciever(void*);
 
 char *packet_generator();
 
@@ -42,7 +39,7 @@ void error(const char *msg)
 int main(int argc, char *argv[])
 {
   printf("CLIENT 1 type: start\n");
-  pthread_t udp_listener_thread, tcp_sender_thread;
+  pthread_t udp_listener_thread, tcp_reciever_thread;
   pthread_create(&udp_listener_thread, NULL, udp_listener, NULL);
   pthread_join(udp_listener_thread, NULL);
   return 0;
@@ -56,8 +53,10 @@ void *udp_listener(void *arg)
   char buf[ALDENLEN]; // буфер
   socklen_t fromlen;
   char *addr;
-  tcp_send.allow = 0;
-  printf("CLIENT 1 type: udp_listener: start\n");
+
+  pthread_t thread = NULL;
+
+  printf("CLIENT 2 type: udp_listener: start\n");
 
   int mysocket,client_addr_size;
   if ((mysocket=socket(AF_INET,SOCK_DGRAM,0))<0)
@@ -68,13 +67,13 @@ void *udp_listener(void *arg)
   local_addr.sin_port = htons(MYPORT);
   local_addr.sin_addr.s_addr = INADDR_ANY;
 
-  char *all = ALLOW_SEND;
-  char *den = DENY_SEND;
+  char *all = ALLOW_RECIEV;
+  char *den = ALLOW_RECIEV;
 
   if (bind(mysocket, (struct sockaddr *)&local_addr, sizeof(local_addr))<0)
   {
     //шаманство с портами
-    printf("CLIENT 1 type: udp_listener: search port\n");
+    printf("CLIENT 2 type: udp_listener: search port\n");
     int i=0;
     while(i<PORTRANGE){
       i++;
@@ -86,7 +85,8 @@ void *udp_listener(void *arg)
     }
   }
   client_addr_size = sizeof(struct sockaddr_in);
-  printf("CLIENT 1 type: udp_listener: listening\n");
+  printf("CLIENT 2 type: udp_listener: listening\n");
+  tcp_recv.allow = 0;
   while (1) 
   {
     if ((bytes_recv = recvfrom(mysocket,&buf[0],sizeof(buf)-1,0,(struct sockaddr *)&client_addr, &client_addr_size)) < 0)
@@ -98,32 +98,33 @@ void *udp_listener(void *arg)
     buf[bytes_recv] = 0;
     // printf("CLIENT 1 type: udp_listener: recived %s packet from %s\n",  &buf[0], (char*)inet_ntoa(client_addr.sin_addr));
     if(!strncmp(buf, all, ALDENLEN)){
-      if(tcp_send.allow == 0){
-        pthread_mutex_lock(&tcp_send.mutex);
-        tcp_send.allow = 1;
-        pthread_mutex_unlock(&tcp_send.mutex);
-        pthread_t thread;
-        pthread_create(&thread, NULL, tcp_sender, (void*)addr);
+      if(thread == NULL){
+        pthread_mutex_lock(&tcp_recv.mutex);
+        tcp_recv.allow = 1;
+        pthread_mutex_unlock(&tcp_recv.mutex);
+        pthread_create(&thread, NULL, tcp_reciever, (void*)addr);
       }
      } else if (!strncmp(buf, den, ALDENLEN)){ 
       printf("DENY FLAG\n");
-      pthread_mutex_lock(&tcp_send.mutex);
-        tcp_send.allow = 0;
-        pthread_mutex_unlock(&tcp_send.mutex);
+      pthread_mutex_lock(&tcp_recv.mutex);
+        tcp_recv.allow = 0;
+        pthread_mutex_unlock(&tcp_recv.mutex);
     }
   }
  }
 
-void *tcp_sender(void *arg)
+void *tcp_reciever(void *arg)
  {
   int my_sock;
-  int n, len;
+  int sleep_time, len;
+  char buff[MAXMSGLEN];
   struct sockaddr_in serv_addr;
+  int bytes_recv;
   struct hostent *server;
   char *msg;
   char *addr;
 
-  printf("CLIENT 1 type: tcp_sender: start\n");
+  printf("CLIENT 2 type: tcp_reciever: start\n");
   
   addr = (char*)arg;
   my_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -144,48 +145,23 @@ void *tcp_sender(void *arg)
   if (connect(my_sock,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
-  while (tcp_send.allow == 1)
+  while (tcp_recv.allow == 1)
      {
-        msg = packet_generator();
-
-        len = ((int*)msg)[1];
-
-        if((len > MAXMSGLEN)||(-len > MAXMSGLEN))
-          printf("ERROR: check generator\n");
-
-        if ((n = send(my_sock, msg, len, 0))< 0) {
-          // printf("ERROR send to socket\n");
-          // pthread_mutex_lock(&tcp_send.mutex);
-          // tcp_send.allow = 0;
-          // pthread_mutex_unlock(&tcp_send.mutex);
-          // printf("server failed\n");
-          // break;
-          error("ERROR send to socket");
-        }
-        printf("CLIENT 1 type: tcp_sender: sent %d bytes: ", ((int*)msg)[1]);
-        for(int i = 8;i<((int*)msg)[1]-1;i++)
-          printf("%c", msg[i]);
-        free(msg);
-        printf("\n");
-        sleep(SLEEP);
-     }
-     free(msg);
-     close(my_sock);
-     printf("exit\n");
-     pthread_exit(0);
- }
-
-char *packet_generator()
- {
-  char *packet;
-  srand(time(NULL)+getpid());
-  static char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  int length = 2 * sizeof(int)+rand()%(MAXMSGLEN-2 * sizeof(int) - MINMSGLEN)+MINMSGLEN;
-  packet = malloc(sizeof(char) * length);
-  ((int*)packet)[0] = SLEEP;
-  ((int*)packet)[1] = length; //длина всей посылки
-  for(int i = 8; i < length; i++) 
-    packet[i] = charset[rand()%(strlen(charset))];
-  packet[length-1] = '\0';
-  return (char*)packet;
- }
+      bzero(&buff, MAXMSGLEN);
+      bytes_recv = recv(my_sock,(char*)&buff[0], MAXMSGLEN, 0);
+      if (bytes_recv < 0) error("ERROR reading from socket");
+        if(bytes_recv == 0) break;
+      buff[bytes_recv+1] = '\0'; //илил не нужно
+      len = ((int*)buff)[1];
+      sleep_time = ((int*)buff)[0];
+      printf("CLIENT2: tcp_reciever: recieved %d bytes: ",len);
+      for(int i = 8; i < len-1-1; i++)
+        printf("%c", buff[i]);
+      printf("\nCLIENT2: sleep %d sec", sleep_time);
+      sleep(sleep_time);
+      }
+      printf("CLIENT2: tcp_reciever: connection dropped\n");
+      close(my_sock);
+      free(msg); //ОСВОБОДИЛ
+      pthread_exit(0);
+    }
