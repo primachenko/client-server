@@ -17,7 +17,8 @@
 #define PORTRANGE 10
 
 #define MAXMSGLEN 50 //максимальная длина 
-#define SLEEP 3
+#define MINMSGLEN 10
+#define SLEEP 1
 
 struct {
     pthread_mutex_t mutex;
@@ -94,25 +95,29 @@ void *udp_listener(void *arg)
     struct hostent *hst;
     hst = gethostbyaddr((char *)&client_addr.sin_addr, 4, AF_INET);
     addr = (char*)inet_ntoa(client_addr.sin_addr);
-    // printf("serv %s\n", (char*)inet_ntoa(client_addr.sin_addr)); // определение адреса сервера
     buf[bytes_recv] = 0;
-    printf("CLIENT 1 type: udp_listener: recived %s packet from %s\n",  &buf[0], (char*)inet_ntoa(client_addr.sin_addr));
-    //buf[0] = 'A'
+    // printf("CLIENT 1 type: udp_listener: recived %s packet from %s\n",  &buf[0], (char*)inet_ntoa(client_addr.sin_addr));
     if(!strncmp(buf, all, ALDENLEN)){
       if(tcp_send.allow == 0){
+        pthread_mutex_lock(&tcp_send.mutex);
         tcp_send.allow = 1;
+        pthread_mutex_unlock(&tcp_send.mutex);
         pthread_t thread;
         pthread_create(&thread, NULL, tcp_sender, (void*)addr);
       }
      } else if (!strncmp(buf, den, ALDENLEN)){ 
+      printf("DENY FLAG\n");
+      pthread_mutex_lock(&tcp_send.mutex);
         tcp_send.allow = 0;
+        pthread_mutex_unlock(&tcp_send.mutex);
     }
   }
  }
 
 void *tcp_sender(void *arg)
  {
-  int my_sock, n;
+  int my_sock;
+  int n, len;
   struct sockaddr_in serv_addr;
   struct hostent *server;
   char *msg;
@@ -122,46 +127,60 @@ void *tcp_sender(void *arg)
   
   addr = (char*)arg;
   my_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (my_sock < 0) 
-        error("ERROR opening socket");
-    // извлечение хоста
+  if (my_sock < 0)
+     error("ERROR opening socket");
   server = gethostbyname(addr);
-    if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
-        exit(0);
+  if (server == NULL) {
+      fprintf(stderr,"ERROR, no such host\n");
+      exit(0);
     }
   bzero((char *) &serv_addr, sizeof(serv_addr)); //очистка
 
-    serv_addr.sin_family = AF_INET;
-
-    bcopy((char *)server->h_addr, 
-         (char *)&serv_addr.sin_addr.s_addr,
-         server->h_length);
+  serv_addr.sin_family = AF_INET;
+  
+  bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
   serv_addr.sin_port = htons(SERVPORT);
+
   if (connect(my_sock,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
   while (tcp_send.allow == 1)
      {
         msg = packet_generator();
-        int k = send(my_sock, msg, ((int*)msg)[1], 0);
-        if (k < 0) error("ERROR send to socket");
+
+        len = ((int*)msg)[1];
+
+        if((len > MAXMSGLEN)||(-len > MAXMSGLEN))
+          printf("ERROR: check generator\n");
+
+        if ((n = send(my_sock, msg, len, 0))< 0) {
+          // printf("ERROR send to socket\n");
+          // pthread_mutex_lock(&tcp_send.mutex);
+          // tcp_send.allow = 0;
+          // pthread_mutex_unlock(&tcp_send.mutex);
+          // printf("server failed\n");
+          // break;
+          error("ERROR send to socket");
+        }
         printf("CLIENT 1 type: tcp_sender: sent %d bytes: ", ((int*)msg)[1]);
         for(int i = 8;i<((int*)msg)[1]-1;i++)
           printf("%c", msg[i]);
+        free(msg);
         printf("\n");
         sleep(SLEEP);
      }
+     free(msg);
      close(my_sock);
+     printf("exit\n");
      pthread_exit(0);
  }
 
 char *packet_generator()
  {
   char *packet;
-  srand(time(NULL));
+  srand(time(NULL)+getpid());
   static char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  int length = 2 * sizeof(int)+rand()%(MAXMSGLEN-2 * sizeof(int));
+  int length = 2 * sizeof(int)+rand()%(MAXMSGLEN-2 * sizeof(int) - MINMSGLEN)+MINMSGLEN;
   packet = malloc(sizeof(char) * length);
   ((int*)packet)[0] = 1;
   ((int*)packet)[1] = length; //длина всей посылки

@@ -81,10 +81,9 @@ void *udp_broadcast(void *arg)
 			if ((n = sendto(sock,msg,ALDENLEN,0,(const struct sockaddr *)&server,length))<0) 
 				error("Sendto");
 			server.sin_port = htons(SERVPORT+i);
-			printf("%d", i);
 		}	
-		printf("SERVER: udp_broadcast: packet %s sent\n", msg);
-		sleep(SLEEPTIME); //иначе много трафика гоняет
+		// printf("SERVER: udp_broadcast: packet %s sent\n", msg);
+		// sleep(SLEEPTIME); //иначе много трафика гоняет
 	}
  }
 
@@ -139,7 +138,7 @@ void *tcp_reviever(void *arg)
  	fflush(stdout);
 	while(1){
 		bzero(&buff, MAXMSGLEN);
-		bzero((char*)&bytes_recv, sizeof(int));
+		// bzero((char*)&bytes_recv, sizeof(int))
 		bytes_recv = recv(sock,(char*)&buff[0], MAXMSGLEN, 0);
 		if (bytes_recv < 0) error("ERROR reading from socket");
 		if(bytes_recv == 0)
