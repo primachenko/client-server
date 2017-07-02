@@ -1,7 +1,7 @@
 all:
-	gcc -pthread -std=gnu99 -o server server.c
-	gcc -pthread -std=gnu99 -o client1 client1.c
-	gcc -pthread -std=gnu99 -o client2 client2.c
+	gcc -pthread -std=c99 -o server server.c
+	gcc -pthread -std=c99 -o client1 client1.c
+	gcc -pthread -std=c99 -o client2 client2.c
 server:
 	gcc -pthread -std=c99 -o server server.c
 client1:
