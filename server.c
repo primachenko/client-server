@@ -11,6 +11,7 @@
 #include <strings.h>
 #include "amsg.pb-c.h"
 
+
 #define ALLOW_SEND "ALL"
 #define DENY_SEND "DEN"
 #define ALLOW_RECIEV "RCV"
