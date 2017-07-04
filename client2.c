@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <strings.h>
+#include <signal.h>
+#include "amsg.pb-c.h"
 
 #define MYPORT 17000
 #define SERVPORT 33000
@@ -17,6 +19,28 @@
 #define ALDENLEN 4
 #define PORTRANGE 10
 #define MAXMSGLEN 40
+
+ void sigfunc(int sig) {
+
+  char c;
+
+  if(sig != SIGPIPE)
+
+  return;
+
+  else {
+
+    printf("\nCLIENT1: Server dropped connection");
+
+    while((c=getchar()) != 'n')
+
+    return;
+
+    pthread_exit(0);
+
+  }
+
+} 
 
 struct {
     pthread_mutex_t mutex;
@@ -151,7 +175,7 @@ void *tcp_reciever(void *arg)
 
 		if (connect(my_sock,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
 		    error("connect() failed");
-		printf("CLIENT 2 type: connected\n");
+		printf("CLIENT 2 type: connected\n\n");
 
 		while (tcp_recv.allow == 1)
 		{
@@ -161,13 +185,21 @@ void *tcp_reciever(void *arg)
 			if (bytes_recv <= 0) 
 				error("recv() failed");
 		
-			buff[bytes_recv+1] = '\0';
-			len = ((int*)buff)[1];
-			sleep_time = ((int*)buff)[0];
-			printf("CLIENT 2 type: recieved %d bytes: ",len);
-			for(int i = 8; i < len-1-1; i++)
-			printf("%c", buff[i]);
-			printf("\nCLIENT 2 type: sleep %d sec\n", sleep_time);
+			AMessage *pmsg;
+			pmsg = amessage__unpack (NULL, bytes_recv, buff);
+			if (pmsg == NULL)
+			{
+			  fprintf(stderr, "error unpacking incoming message\n");
+			  return (void*)1;
+			}
+			len = pmsg->b;
+			sleep_time = pmsg->a;
+			printf("CLIENT 2 type: recieved %d bytes: <=== ",bytes_recv);
+			
+			printf("[%d][%d][%s]\n", pmsg->a, pmsg->b, pmsg->c);
+			amessage__free_unpacked(pmsg,NULL);
+
+			printf("CLIENT 2 type: sleep %d sec\n\n", sleep_time);
 			sleep(sleep_time);
 		}
 		printf("CLIENT 2 type: queue is empty\n");

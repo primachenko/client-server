@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include "amsg.pb-c.h"
+#include <signal.h>
 
 #define MYPORT 16000
 #define SERVPORT 32000
@@ -18,7 +20,29 @@
 #define PORTRANGE 10
 #define MAXMSGLEN 40
 #define MINMSGLEN 10
-#define SLEEP 5
+#define SLEEP 2
+
+ void sigfunc(int sig) {
+
+  char c;
+
+  if(sig != SIGPIPE)
+
+  return;
+
+  else {
+
+    printf("\nCLIENT1: Server dropped connection");
+
+    while((c=getchar()) != 'n')
+
+    return;
+
+    pthread_exit(0);
+
+  }
+
+} 
 
 struct {
     pthread_mutex_t mutex;
@@ -126,11 +150,14 @@ void *udp_listener(void *arg)
 void *tcp_sender(void *arg)
    {
       int my_sock;
-      int n, len, sleep_time;
+      int n, len, sleep_time, buff_len;
       struct sockaddr_in serv_addr;
       struct hostent *server;
       char *msg;
+      void *buff; //для протобуфа
       char *addr;
+
+      AMessage pbmsg = AMESSAGE__INIT; //для протобуфа
 
       addr = (char*)arg;
 
@@ -159,7 +186,7 @@ void *tcp_sender(void *arg)
             	error("connect() failed");
             }
 
-      printf("CLIENT 1 type: connected\n");
+      printf("CLIENT 1 type: connected\n\n");
 
       while (tcp_send.allow == 1)
          {
@@ -167,21 +194,32 @@ void *tcp_sender(void *arg)
             msg = packet_generator();
             sleep_time = ((int*)msg)[0];
             len = ((int*)msg)[1];
+            /*здесь будет протобуф*/
 
-            if ((n = send(my_sock, msg, len, 0))< 0)
+            pbmsg.a = sleep_time;
+            pbmsg.b = len;
+            // pbmsg.c = (char*)malloc(len);
+            // bcopy(pbmsg.c, msg, len - 8);
+            pbmsg.c = (char*)malloc(len-8);
+            strcpy(pbmsg.c, &msg[8]);
+            buff_len = amessage__get_packed_size(&pbmsg);
+            buff = malloc(buff_len);
+            amessage__pack(&pbmsg,buff);
+
+            /*конец протобуфа */
+            if ((n = send(my_sock, buff, buff_len, 0))< 0)
             {
               error("ERROR send to socket");
             }
 
-            printf("CLIENT 1 type: sent %d bytes: ", ((int*)msg)[1]);
+            printf("CLIENT 1 type: sent %d bytes: ===> ", buff_len);
 
-            for(int i = 8;i<((int*)msg)[1]-1;i++)
-            {
-              printf("%c", msg[i]);
-            }
-
+            printf("[%d][%d][%s]", pbmsg.a, pbmsg.b, pbmsg.c);
+            //освобождаем память
             free(msg);
-            printf("\nCLIENT 1 type: sleep %d sec\n", sleep_time);
+            free(buff);
+
+            printf("\nCLIENT 1 type: sleep %d sec\n\n", sleep_time);
             sleep(sleep_time);
          }
       pthread_mutex_lock(&tcp_send.mutex);

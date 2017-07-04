@@ -1,0 +1,5 @@
+message AMessage {
+  required int32 a=1; 
+  required int32 b=2;
+  required string c=3;
+}

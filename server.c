@@ -1,4 +1,3 @@
-//
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,6 +9,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <strings.h>
+#include "amsg.pb-c.h"
 
 #define ALLOW_SEND "ALL"
 #define DENY_SEND "DEN"
@@ -23,7 +23,7 @@
 #define MAXSLEEPTIME 10
 #define PORTRANGE 10
 #define MAXMSGLEN 40
-#define QUEUELEN 10
+#define QUEUELEN 5
 #define LSTQUEUELEN 5
 
 struct queue
@@ -66,7 +66,7 @@ int put_msg(char *pt)
 			return -1;
 		}
 		pthread_mutex_lock(&qpacket.mutex);
-		bcopy(pt, qpacket.packet[qpacket.elements], MAXMSGLEN);
+		bcopy(pt, qpacket.packet[qpacket.elements], MAXMSGLEN+12);
 		qpacket.elements++;
 		pthread_mutex_unlock(&qpacket.mutex);
 		return 0;
@@ -233,8 +233,7 @@ void *tcp_recieve_listener(void *arg)
 	}
 void *tcp_reciever(void *arg)
 	{
-	 	char buff[MAXMSGLEN];
-	 	char *msg = (char*) malloc(sizeof(char) * MAXMSGLEN);
+	 	char *buff = (char*) malloc(MAXMSGLEN);
 	 	int bytes_recv;
 	 	int sock;
 	 	int *pt = (int*)arg;
@@ -242,30 +241,39 @@ void *tcp_reciever(void *arg)
 
 		while(qpacket.elements < QUEUELEN)
 		{
-			bzero(&buff, MAXMSGLEN);
-			bytes_recv = recv(sock,(char*)&buff[0], MAXMSGLEN, 0);
+			bzero(buff, MAXMSGLEN);
+			bytes_recv = recv(sock,(char*)buff, MAXMSGLEN, 0);
 
 			if (bytes_recv <= 0) 
 			{
 				error("recv() failed");
 			}
 
-			buff[bytes_recv+1] = '\0';
-			printf("SERVER: revieved and added to the queue %d bytes: ", ((int*)buff)[1]);
-			put_msg(&buff[0]);
-
-			for(int i = 8; i < ((int*)buff)[1]-1; i++)
+			AMessage *pmsg;
+			pmsg = amessage__unpack (NULL, bytes_recv, buff);
+			if (pmsg == NULL)
 			{
-				printf("%c", buff[i]);
+				fprintf(stderr, "error unpacking incoming message\n");
+				return (void*)1;
 			}
 
-			printf("\nSERVER: сells in the queue: %d\n", QUEUELEN - qpacket.elements);
+			printf("SERVER: revieved %d bytes: ", bytes_recv);
+			printf("<=== [%d][%d][%s]\n", pmsg->a, pmsg->b, pmsg->c);
+
+			/*так как неожиданно оказалось что протобуф сжимает данные 
+			придется либо переписывать очередь и все что с ней связано,
+			либо лепить костыль. Конечно же бдуем лепить костыль :)*/
+
+			buff[bytes_recv+1] = '\0'; //или +1
+            put_msg(buff);
+			amessage__free_unpacked(pmsg,NULL);
+			printf("SERVER: сells in the queue: %d\n\n", QUEUELEN - qpacket.elements);
 		}
 
 		printf("SERVER: connection dropped\n");
-		sleep(MAXSLEEPTIME);
+		// sleep(MAXSLEEPTIME);
 		close(sock);
-		free(msg);
+		free(buff);
 		pthread_exit(0);
 	}
 
@@ -314,33 +322,44 @@ void *tcp_send_listener(void *arg)
 void *tcp_sender(void *arg)	
  	{
 		int my_sock;
-		int n, len;
+		int n, len, sleep_time;
 		char *msg;
 
 		my_sock = *((int*)arg);
 		while(qpacket.elements > 0)
 			{
 				msg = get_msg();
-				len = ((int*)msg)[1];
+				for (int i = 0; i < MAXMSGLEN+1; i++)
+				{
+					if(msg[i]=='\0'){
+						len = i;
+						break;
+					}
+				}
+				AMessage *pmsg;
+				pmsg = amessage__unpack (NULL, len, msg);
+				if (pmsg == NULL)
+				{
+					fprintf(stderr, "error unpacking incoming message\n");
+					return (void*)1;
+				}
+				sleep_time = pmsg->a;
 				if ((n = send(my_sock, msg, len, 0))< 0)
 				{
 					error("send() failed");
 				}
 
-				printf("SERVER: sent %d bytes: ", len);
+				printf("SERVER: sent %d bytes: ===> [%d][%d][%s]\n", len, pmsg->a, pmsg->b, pmsg->c);
 
-				for(int i = 8;i < len;i++) //len-1?
-				{
-					printf("%c", msg[i]);
-				}
+				printf("SERVER: сells in the queue: %d\n\n", QUEUELEN - qpacket.elements);
+				amessage__free_unpacked(pmsg,NULL);
+				sleep(sleep_time);
 
-				printf("\nSERVER: сells in the queue: %d\n", QUEUELEN - qpacket.elements);
-				sleep(((int*)msg)[0]);
 			}
 
 			free(msg);
 			printf("SERVER: no cell for sending\n");
-			sleep(MAXSLEEPTIME);
+			// sleep(MAXSLEEPTIME);
 			close(my_sock);
 			pthread_exit(0);
 	}
